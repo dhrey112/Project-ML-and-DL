@@ -12,8 +12,12 @@ pip install -r requirements.txt
 python Cartoonifier.py
 ```
 ## Publication
-Medium link to the [project publication](https://medium.com/boundlessinfo/a-mini-project-with-opencv-in-python-cartoonify-an-image-d82b9ff6df70) 
+Medium link to the [project publication](https://medium.com/boundlessinfo/a-mini-project-with-opencv-in-python-cartoonify-an-image-d82b9ff6df70)
+
 
 # Image Classifier
 This project was implemented using Keras/Tensorflow
 
+
+# Digit Classifier
+This is a simple project implemented using SciKit Image library 
