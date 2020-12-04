@@ -10,11 +10,11 @@ A GUI application for transforming image to a cartoon using OpenCV python librar
 OpenCV is one of the library used in machine learning when dealing with computer vision,
  object detection, face recognition etcetera.
  
- # to run the app
+ # To run the app
 python Cartoonifier.py
  
  ## Publication
-Medium link to the [project publication](https://medium.com/boundlessinfo/a-mini-project-with-opencv-in-python-cartoonify-an-image-d82b9ff6df70)
+Medium publication link to the [cartoonifier project](https://medium.com/boundlessinfo/a-mini-project-with-opencv-in-python-cartoonify-an-image-d82b9ff6df70)
 
 
 # Image Classifier
