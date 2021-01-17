@@ -1,0 +1,343 @@
+---
+title: "Thera Bank - Loan Purchase Modeling"
+author: "Adeleke Dare"
+date: "8/31/2020"
+output: word_document
+---
+
+```{r}
+library(readxl)
+library(tidyverse)
+library(gridExtra)
+library(recipes)
+library(caret)
+library(rpart)
+library(cluster)
+library(Rtsne)
+library(rpart.plot)
+library(randomForest)
+library(AUC)
+library(lime)
+library(corrr)
+library(tidyquant)
+library(pROC)
+library(party)
+
+```
+
+```{r}
+# Import the dataset 
+loan <- read_excel("C:/Users/DHREY/Desktop/R-ass/Thera-Bank_Personal_Loan_Modelling-dataset-1.xlsx", sheet = 2)
+
+str(loan)
+summary(loan)
+
+
+# Issue in our data set
+# Variables like Personal Loan, Securities Account, CD account, Online, Credit card will be preferred in categorical variable rather than numeric since they are "YES" or "NO"  type of response.
+# Response Variable/Dependent variable is  Personal Loan 
+# Un-useful variable like ID, zip code will be removed from our data set
+# Age, Education and Year of Experience will be categorized into difference level as it is advisable to treat this kind of variable like that.
+# Family members variable has missing values. This will be treated by using impute with mean method
+
+# Imputing mean value to fill the missing value 
+loan$`Family members`[is.na(loan$`Family members`)] <- mean(loan$`Family members`, na.rm = T)
+
+
+loan<- loan %>% mutate(agegroup = case_when(`Age (in years)` >= 18 & `Age (in years)` <= 35 ~ '1', `Age (in years)` >= 36 & `Age (in years)` <= 52 ~ '2', `Age (in years)` >= 53 & `Age (in years)` <= 100 ~ '3'))
+
+loan$agegroup<- factor(loan$agegroup, labels=c("Young", "Middle-Aged","Old"))
+
+
+loan<- loan %>% mutate(income = case_when(`Income (in K/month)` >= 1 & `Income (in K/month)` <= 15 ~ '1', `Income (in K/month)` >= 16 & `Income (in K/month)` <= 30 ~ '2', `Income (in K/month)` >= 31 & `Income (in K/month)` <= 75 ~ '3', `Income (in K/month)` >= 76 & `Income (in K/month)` <= 300 ~ '4'))
+
+loan$income <- factor(loan$income, labels = c("Lower Class","Working Class","Lower Middle Class","Upper Middle Class"))
+
+loan <- loan %>% mutate(personalLoan = case_when(`Personal Loan` == 0 ~ '1', `Personal Loan` == 1 ~ '2'))
+loan$personalLoan <- factor(loan$personalLoan, labels = c("No", "Yes"))
+
+#Let convert the numeric variable to factor since they are YES or NO (Categorical) variable\
+loan$Online <- as.factor(loan$Online)
+loan$CreditCard <- as.factor(loan$CreditCard)
+loan$`Securities Account` <- as.factor(loan$`Securities Account`)
+loan$`CD Account` <- as.factor(loan$`CD Account`)
+loan$Education <- as.factor(loan$Education)
+
+# Labeling of levels in education variable
+loan$Education <- factor(loan$Education, labels = c("Undergrad", "Graduate", "Advanced/Professional"))
+
+# Rename of variables to get rid of the space
+loan <- rename(loan, securitiesAcct = `Securities Account`)
+loan <- rename(loan, CDAcct = `CD Account`)
+loan <- rename(loan, familyMember = `Family members`)
+
+# Categorizing the year of experience to difference levels and labeling 
+loan<- loan%>% mutate(Exp_Agegroup = case_when(`Experience (in years)` < 1 & `Experience (in years)` <= 0 ~ '1', `Experience (in years)` >= 1 & `Experience (in years)` <= 10 ~ '2', `Experience (in years)` >= 11 & `Experience (in years)`<= 20 ~ '3',`Experience (in years)` >= 21 & `Experience (in years)` <= 30 ~ '4',`Experience (in years)` >= 31 & `Experience (in years)` <= 40 ~ '5',`Experience (in years)` >= 41 & `Experience (in years)` <= 90 ~ '6' ))
+
+loan$Exp_Agegroup<- factor(loan$Exp_Agegroup, labels=c("0yrs_Exp", "Between 1-10yrs", "Between 11-20yrs","Between 21-30yrs", "Between 31-40yrs","Between 41-50yrs"))
+
+
+# Remove the variable that have been transformed and the useless variables
+loan <- loan[, -1] # ID
+loan <- loan[, -1] # Age
+loan <- loan[, -1] # Experience
+loan <- loan[, -2] # Zip code
+loan <- loan[, -1] # Income
+loan <- loan[, -5] # Personal Loan
+str(loan)
+print("                                                                  ")
+print("            ################ SUMMARY ##########################")
+summary(loan)
+
+```
+```{r Categorical Variable Distribution}
+# Univariate, Let’s Examine the distribution of our classification variables
+# Percentage Value will be used for categorical varaibles
+# While Central Tendency will be used for Continuous variable
+
+expr <- ggplot(loan, aes(x=Exp_Agegroup)) + ggtitle("Years of Experience") + xlab("Experience Group") + geom_bar(aes(y = 100*(..count..)/sum(..count..)), width = 0.5, color = 'red') + ylab("Percentage") + coord_flip() + theme_minimal() + scale_fill_manual(values = c("red","blue","green","yellow"))
+
+agegroup <- ggplot(loan, aes(x=agegroup)) + ggtitle("Age Group") + xlab("Age Group") + geom_bar(aes(y = 100*(..count..)/sum(..count..)), width = 0.5, colour = 'red') + ylab("Percentage") + coord_flip()
+
+cdAcct <- ggplot(loan, aes(x=CDAcct)) + ggtitle("Credit Debit Account") + xlab("Credit Debit Account") + geom_bar(aes(y = 100*(..count..)/sum(..count..)), width = 0.5, colour = 'red') + ylab("Percentage") + coord_flip() + theme_minimal()
+
+
+secAcct <- ggplot(loan, aes(x=securitiesAcct)) + ggtitle("Securities Account") + xlab("Securities Account") + geom_bar(aes(y = 100*(..count..)/sum(..count..)), width = 0.5, colour = 'red') + ylab("Percentage") + coord_flip()+ theme_minimal()
+
+
+online <- ggplot(loan, aes(x=Online)) + ggtitle("Online Banking") + xlab("Online") + geom_bar(aes(y = 100*(..count..)/sum(..count..)), width = 0.5, colour = 'red') + ylab("Percentage") + coord_flip() + theme_minimal()
+
+
+creditCard <- ggplot(loan, aes(x=CreditCard)) + ggtitle("Credit Card") + xlab("Credit Card") + geom_bar(aes(y = 100*(..count..)/sum(..count..)), width = 0.5, colour = 'red') + ylab("Percentage") + coord_flip() + theme_minimal()
+
+
+education <- ggplot(loan, aes(x=Education)) + ggtitle("Education Level") + xlab("Education Level") + geom_bar(aes(y = 100*(..count..)/sum(..count..)), width = 0.5, colour = 'red') + ylab("Percentage") + coord_flip() + theme_minimal()
+
+
+Income <- ggplot(loan, aes(x= income)) + ggtitle("Annual income") + xlab("Income") + geom_bar(aes(y = 100*(..count..)/sum(..count..)), width = 0.5, colour = 'red') + ylab("Percentage") + coord_flip() + theme_minimal()
+
+grid.arrange(Income, expr, agegroup, cdAcct, secAcct, online, creditCard, education, ncol = 3)
+```
+
+```{r Numeric Variable Distribution}
+
+familyMem <- ggplot(loan, aes(x= familyMember)) + ggtitle("Family size of the customer") + xlab("Family Members") + geom_histogram() + theme_minimal()
+
+ccAvg <- ggplot(loan, aes(x= CCAvg)) + ggtitle("Avg. spending on credit cards per month. ($000)") + xlab("CC-Average") + geom_histogram() + theme_minimal()
+
+mortgage <- ggplot(loan, aes(x= Mortgage)) + ggtitle("Value of house mortgage if any. ($000)") + xlab("Mortgage") + geom_histogram() + theme_minimal()
+
+grid.arrange(familyMem, ccAvg, mortgage, ncol = 2)
+
+```
+
+
+
+```{r}
+#' Compute Gower distance
+ gower_dist <- daisy(loan, metric = "gower")
+
+ gower_mat <- as.matrix(gower_dist)
+
+#' Print most similar clients
+ loan[which(gower_mat == min(gower_mat[gower_mat != min(gower_mat)]), arr.ind = TRUE) [1, ], ]
+ 
+#' Print most similar clients
+ loan[which(gower_mat == max(gower_mat[gower_mat != max(gower_mat)]), arr.ind = TRUE)[1, ], ]
+
+ sil_width <- c(NA)
+ for (i in 2:8) {
+   pam_fit <- pam(gower_dist, diss = TRUE, k = i)
+   sil_width[i] <- pam_fit$silinfo$avg.width
+ }
+
+ plot(1:8, sil_width,
+      xlab = "Number of clusters",
+      ylab = "Sihouette Width")
+ lines(1:8, sil_width)
+
+ # 8 clusters has the highest silhouette width. 6 is simpler and almost as good. Let’s pick k = 6
+ k <- 6
+ pam_fit <- pam(gower_dist, diss = TRUE, k)
+ pam_results <- loan %>%
+   mutate(cluster = pam_fit$clustering) %>%
+   group_by(cluster) %>%
+   do(the_summary = summary(.))
+ pam_results$the_summary
+
+ tsne_obj <- Rtsne(gower_dist, is_distance = TRUE)
+ tsne_data <- tsne_obj$Y %>%
+   data.frame() %>%
+   setNames(c("X", "Y")) %>%
+   mutate(cluster = factor(pam_fit$clustering))
+
+ ggplot(aes(x = X, y = Y), data = tsne_data) + geom_point(aes(color = cluster))
+```
+
+```{r}
+#Splitting, Testing, and Training
+
+set.seed(0)
+split <- sample(seq_len(nrow(loan)),
+               size = floor(0.70 * nrow(loan)))
+train_set <- loan[split, ]
+test_set <- loan[-split, ]
+dim(train_set); dim(test_set)
+
+loan_recipe <- recipe(personalLoan ~ ., data = train_set) %>% step_log(Mortgage, signed = TRUE) %>% step_log(CCAvg, signed = TRUE) %>% step_dummy(all_nominal(), -all_outcomes()) %>% step_center(all_predictors(), -all_outcomes()) %>% step_scale(all_predictors(), -all_outcomes()) %>% prep(data = train_set)
+
+train_bake <- bake(loan_recipe, new_data = train_set)
+test_bake <- bake(loan_recipe, new_data = test_set)
+glimpse(train_bake)
+
+```
+```{r}
+# Cross validation
+cv.ctrl <- trainControl(method = "repeatedcv", repeats = 10, number = 3)
+
+```
+
+```{r Decision Trree with Control Point (rpart), echo=TRUE}
+#Applying CART <plot the tree> on the training set  
+# Decision Tree with control point using Rpart Package and the plot 
+rpart.plot(rpart(formula = personalLoan~., data = train_bake, method = "class", control = rpart.control(maxdepth = 4)), box.palette="RdBu", digits = -3)
+treeWithCP <- train(form = personalLoan~., data = train_bake, method="rpart", control = rpart.control(maxdepth = 4), trControl=cv.ctrl)
+
+#Predict value at any point and The confusion Matrix
+treeWithCp_pred <- predict(treeWithCP, test_bake, type = "raw")
+confusionMatrix(treeWithCp_pred, test_bake$personalLoan)
+```
+```{r Full Tree and Prune Tree (rpart), echo=TRUE}
+#Full tree without pruning and the plot
+fullTree <- rpart(formula = personalLoan~., data = train_bake, method = "class", control = rpart.control(cp = 0))
+rpart.plot(fullTree, box.palette="GnYlRd", digits = -3)
+
+# To carry out pruning, let find the value of cp at which Cross Validation error is at minimum
+treeWithCP <- rpart(formula = personalLoan~., data = train_bake, method = "class", control = rpart.control(maxdepth = 4))
+
+printcp(fullTree)
+plotcp(treeWithCP)
+mincp <- treeWithCP$cptable[which.min(treeWithCP$cptable[, "xerror"]), "CP"]
+
+# Prune the tree
+prunedTree <- prune(fullTree, cp = mincp)
+rpart.plot(prunedTree, box.palette = "YlGnBl", digits = -3)
+prunedTree <- train(form = personalLoan~., data = train_bake, cp = mincp, trControl=cv.ctrl)
+
+#Predict value at any point of pruned tree
+prunedTree_pred <- predict(prunedTree, test_bake, type = "raw")
+confusionMatrix(prunedTree_pred, test_bake$personalLoan)
+
+```
+
+```{r Decision Tree Using Ctree from Party Package}
+fit.ctree <- ctree(personalLoan~., data = train_bake)
+plot(fit.ctree, type = 'simple')
+
+fit.ctree <- train(form = personalLoan~., data = train_bake, method = "ctree",  trControl=cv.ctrl)
+Ctree_pred = predict(fit.ctree, newdata=test_bake)
+confusionMatrix(Ctree_pred, test_bake$personalLoan)
+
+```
+
+
+```{r Random Forest}
+mtry <- sqrt(ncol(train_bake)) # Number of variables randomly sampled as candidates at each split
+tunegrid <- expand.grid(.mtry=mtry)
+rf<- train(form = personalLoan~., data=train_bake, method="rf", metric="Accuracy", tuneGrid=tunegrid, trControl=cv.ctrl)
+rf_pred<-predict(rf, test_bake, type="raw")
+confusionMatrix(rf_pred, test_bake$personalLoan)
+```
+
+```{r}
+# ROC Curve for Deciosion Tree without pruning using rpart package
+response1 <- predictor1 <- c()
+response1 <- c(response1, test_bake$personalLoan)
+predictor1<- c(predictor1, treeWithCp_pred)
+roc1 <- plot.roc(response1, predictor1, main="ROC Curve for the Fitted Models",ylab="True Positive Rate",xlab="False Positive Rate", percent=F, col="red", print.auc=TRUE)
+
+"The AUC, GINI and KS for tree without pruning "
+auc(roc1)
+2*auc(roc1)-1
+ks.test(response1, predictor1)
+
+
+# ROC Curve for Decision Tree with Pruning using rpart package
+response2 <- predictor2 <- c()
+response2 <- c(response2, test_bake$personalLoan)
+predictor2 <- c(predictor2, prunedTree_pred)
+par(new=T)
+roc2 <- plot.roc(response2, predictor2, ylab="True Positive Rate",xlab="False Positive Rate", percent=F, col="blue", print.auc=TRUE)
+
+"The AUC, GINI and KS for tree with prunnig "
+auc(roc2)
+2*auc(roc2)-1
+ks.test(response2, predictor2)
+
+
+# ROC Curve for Decision Tree using Ctree in Party package
+response3 <- predictor3 <- c()
+response3 <- c(response3, test_bake$personalLoan)
+predictor3<- c(predictor3, Ctree_pred)
+par(new=T)
+roc3 <- plot.roc(response3, predictor3, ylab="True Positive Rate",xlab="False Positive Rate", percent=F, col="peachpuff")
+
+"The AUC, GINI and KS for ctree"
+auc(roc3)
+2*auc(roc3)-1
+ks.test(response3, predictor3)
+
+# ROC Curve for Random Forest
+response4<- predictor4 <- c()
+response4 <- c(response4, test_bake$personalLoan)
+predictor4 <- c(predictor4, Ctree_pred)
+par(new=T)
+roc4 <- plot.roc(response4, predictor4, ylab="True Positive Rate",xlab="False Positive Rate", percent=F, col="darkseagreen4")
+
+"The AUC, GINI and KS for Random forest"
+auc(roc4)
+2*auc(roc4)-1
+ks.test(response4, predictor4)
+
+legend("bottomright", legend = c("Tree with CP", "Tree with Pruning",  "DT using Ctree", "Random Forest"), col = c("red", "blue","peachpuff", "darkseagreen4"),lwd = 5)
+```
+
+
+```{r}
+explainer <- lime::lime(x = train_bake,
+                        model = prunedTree,
+                        quantile_bins = FALSE
+                        )
+
+explanation <- lime::explain(test_bake[1:6, ],
+                             explainer = explainer,
+                             n_features = 8,
+                            feature_select = "highest_weights",
+                            labels = "Yes"
+)
+plot_features(explanation) +
+labs(title = "Feature Importance for the Pruned Tree Model",
+subtitle = " Selected five cases")
+```
+```{r}
+train_bake$personalLoan<-as.numeric(train_bake$personalLoan)
+global_perspective <- train_bake %>% 
+  correlate() %>% 
+  focus(personalLoan) %>%
+  rename(Variable = rowname) %>%
+  arrange(abs(personalLoan)) %>%
+  mutate(feature = as.factor(Variable))
+global_perspective
+
+```
+
+```{r}
+global_perspective %>% ggplot(aes(x = personalLoan, y = fct_reorder(Variable, desc(personalLoan)))) + geom_point() + geom_segment(aes(xend = 0, yend = Variable), color = palette_dark()[[6]], data = global_perspective %>% filter(personalLoan > 0)) + geom_point(color = palette_dark()[[6]], data = global_perspective %>% filter(personalLoan > 0)) + geom_segment(aes(xend = 0, yend = Variable), color = palette_dark()[[10]], data = global_perspective %>% filter(personalLoan < 0)) + geom_point(color = palette_light()[[10]], data = global_perspective %>% filter(personalLoan < 0)) + geom_vline(xintercept = 0, color = palette_light()[[8]], size = 1, linetype = 2) + geom_vline(xintercept = -0.5, color = palette_light()[[8]], size = 1, linetype = 2) + geom_vline(xintercept = 0.5, color = palette_light()[[8]], size = 1, linetype = 2) +
+theme_bw() + labs(title = " Correlation Analysis for Loan Acceptance",subtitle = paste("Negative Correlations (Prevent Acceptance),","Positive Correlations (Support Acceptance)"),y = "Feature Importance")
+
+
+
+```
+
+
+
